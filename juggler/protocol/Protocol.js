@@ -733,6 +733,7 @@ const Page = {
       data: t.String,
       deviceWidth: t.Number,
       deviceHeight: t.Number,
+      timestamp: t.Number,
     },
   },
 

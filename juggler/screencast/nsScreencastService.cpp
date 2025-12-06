@@ -197,6 +197,7 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
     if (mFramesInFlight.load() >= kMaxFramesInFlight)
       return;
 
+    double timestamp = (TimeStamp::Now() - TimeStamp::ProcessCreation()).ToSeconds();
     int screenshotWidth = pageWidth;
     int screenshotHeight = pageHeight;
     int screenshotTopMargin = mMargin.TopBottom();
@@ -278,11 +279,11 @@ class nsScreencastService::Session : public webrtc::VideoSinkInterface<webrtc::V
 
     mFramesInFlight.fetch_add(1);
     NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "NotifyScreencastFrame", [this, protect = RefPtr{this}, base64, pageWidth, pageHeight]() -> void {
+        "NotifyScreencastFrame", [this, protect = RefPtr{this}, base64, pageWidth, pageHeight, timestamp]() -> void {
           if (mStopped)
             return;
           NS_ConvertUTF8toUTF16 utf16(base64);
-          mClient->ScreencastFrame(utf16, pageWidth, pageHeight);
+          mClient->ScreencastFrame(utf16, pageWidth, pageHeight, timestamp);
         }));
   }
 

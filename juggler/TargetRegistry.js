@@ -766,7 +766,7 @@ export class PageTarget {
     const registry = this._registry;
     const screencastClient = {
       QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight) {
+      screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
       },
       screencastStopped() {
         registry.emit(TargetRegistry.Events.ScreencastStopped, sessionId);
@@ -806,9 +806,9 @@ export class PageTarget {
     const self = this;
     const screencastClient = {
       QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight) {
+      screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
         if (self._screencastRecordingInfo)
-          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight });
+          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
       },
       screencastStopped() {
       },
