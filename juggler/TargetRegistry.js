@@ -777,7 +777,7 @@ export class PageTarget {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    this._screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
+    this._screencastId = screencastService.startScreencast(screencastClient, docShell, width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
   }
 
   screencastFrameAck() {
@@ -791,7 +791,7 @@ export class PageTarget {
       return;
     const screencastId = this._screencastId;
     this._screencastId = undefined;
-    screencastService.stopVideoRecording(screencastId);
+    screencastService.stopScreencast(screencastId);
   }
 
   ensureContextMenuClosed() {
