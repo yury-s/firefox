@@ -16,6 +16,12 @@
 #  include <unistd.h>  // for getpid()
 #endif
 
+#if JS_HAS_INTL_API && !MOZ_SYSTEM_ICU
+#  include "unicode/locid.h"
+#endif /* JS_HAS_INTL_API && !MOZ_SYSTEM_ICU */
+
+#include "js/LocaleSensitive.h"
+
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/BasePrincipal.h"
@@ -63,6 +69,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FragmentDirective.h"
+#include "mozilla/dom/Geolocation.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/Navigation.h"
@@ -95,6 +102,7 @@
 #include "mozilla/dom/DocumentBinding.h"
 #include "mozilla/glean/DocshellMetrics.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/net/DocumentChannel.h"
 #include "mozilla/net/DocumentChannelChild.h"
 #include "mozilla/net/ParentChannelWrapper.h"
@@ -119,6 +127,7 @@
 #include "nsIDocumentViewer.h"
 #include "mozilla/dom/Document.h"
 #include "nsHTMLDocument.h"
+#include "mozilla/dom/Element.h"
 #include "nsIDocumentLoaderFactory.h"
 #include "nsIDOMWindow.h"
 #include "nsIEditingSession.h"
@@ -214,6 +223,7 @@
 #include "nsGlobalWindowInner.h"
 #include "nsGlobalWindowOuter.h"
 #include "nsJSEnvironment.h"
+#include "nsJSUtils.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsObjectLoadingContent.h"
@@ -355,6 +365,14 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext,
       mAllowDNSPrefetch(true),
       mAllowWindowControl(true),
       mCSSErrorReportingEnabled(false),
+      mFileInputInterceptionEnabled(false),
+      mOverrideHasFocus(false),
+      mBypassCSPEnabled(false),
+      mForceActiveState(false),
+      mDisallowBFCache(false),
+      mReducedMotionOverride(REDUCED_MOTION_OVERRIDE_NONE),
+      mForcedColorsOverride(FORCED_COLORS_OVERRIDE_NO_OVERRIDE),
+      mContrastOverride(CONTRAST_OVERRIDE_NONE),
       mAllowAuth(mItemType == typeContent),
       mAllowKeywordFixup(false),
       mDisableMetaRefreshWhenInactive(false),
@@ -3042,6 +3060,174 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
   return NS_OK;
 }
 
+// =============== Juggler Begin =======================
+
+nsDocShell* nsDocShell::GetRootDocShell() {
+  nsCOMPtr<nsIDocShellTreeItem> rootAsItem;
+  GetInProcessSameTypeRootTreeItem(getter_AddRefs(rootAsItem));
+  nsCOMPtr<nsIDocShell> rootShell = do_QueryInterface(rootAsItem);
+  return nsDocShell::Cast(rootShell);
+}
+
+NS_IMETHODIMP
+nsDocShell::GetBypassCSPEnabled(bool* aEnabled) {
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = mBypassCSPEnabled;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetBypassCSPEnabled(bool aEnabled) {
+  mBypassCSPEnabled = aEnabled;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetForceActiveState(bool* aEnabled) {
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = mForceActiveState;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetForceActiveState(bool aEnabled) {
+  mForceActiveState = aEnabled;
+  ActivenessMaybeChanged();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetDisallowBFCache(bool* aEnabled) {
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = mDisallowBFCache;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetDisallowBFCache(bool aEnabled) {
+  mDisallowBFCache = aEnabled;
+  return NS_OK;
+}
+
+bool nsDocShell::IsBypassCSPEnabled() {
+  return GetRootDocShell()->mBypassCSPEnabled;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetOverrideHasFocus(bool* aEnabled) {
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = mOverrideHasFocus;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetOverrideHasFocus(bool aEnabled) {
+  mOverrideHasFocus = aEnabled;
+  return NS_OK;
+}
+
+bool nsDocShell::ShouldOverrideHasFocus() const {
+  return mOverrideHasFocus;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetFileInputInterceptionEnabled(bool* aEnabled) {
+  MOZ_ASSERT(aEnabled);
+  *aEnabled = GetRootDocShell()->mFileInputInterceptionEnabled;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetFileInputInterceptionEnabled(bool aEnabled) {
+  mFileInputInterceptionEnabled = aEnabled;
+  return NS_OK;
+}
+
+bool nsDocShell::IsFileInputInterceptionEnabled() {
+  return GetRootDocShell()->mFileInputInterceptionEnabled;
+}
+
+void nsDocShell::FilePickerShown(mozilla::dom::Element* element) {
+  nsCOMPtr<nsIObserverService> observerService =
+      mozilla::services::GetObserverService();
+  observerService->NotifyObservers(
+      ToSupports(element), "juggler-file-picker-shown", nullptr);
+}
+
+RefPtr<nsGeolocationService> nsDocShell::GetGeolocationServiceOverride() {
+  return GetRootDocShell()->mGeolocationServiceOverride;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetGeolocationOverride(nsIDOMGeoPosition* aGeolocationOverride) {
+  if (aGeolocationOverride) {
+    if (!mGeolocationServiceOverride) {
+      mGeolocationServiceOverride = new nsGeolocationService();
+      mGeolocationServiceOverride->Init();
+    }
+    mGeolocationServiceOverride->Update(aGeolocationOverride);
+  } else {
+    mGeolocationServiceOverride = nullptr;
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetReducedMotionOverride(ReducedMotionOverride* aReducedMotionOverride) {
+  *aReducedMotionOverride = GetRootDocShell()->mReducedMotionOverride;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetReducedMotionOverride(ReducedMotionOverride aReducedMotionOverride) {
+  mReducedMotionOverride = aReducedMotionOverride;
+  RefPtr<nsPresContext> presContext = GetPresContext();
+  if (presContext) {
+    presContext->MediaFeatureValuesChanged(
+        {MediaFeatureChangeReason::SystemMetricsChange},
+        MediaFeatureChangePropagation::JustThisDocument);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetForcedColorsOverride(ForcedColorsOverride* aForcedColorsOverride) {
+  *aForcedColorsOverride = GetRootDocShell()->mForcedColorsOverride;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetForcedColorsOverride(ForcedColorsOverride aForcedColorsOverride) {
+  mForcedColorsOverride = aForcedColorsOverride;
+  RefPtr<nsPresContext> presContext = GetPresContext();
+  if (presContext) {
+    presContext->MediaFeatureValuesChanged(
+        {MediaFeatureChangeReason::SystemMetricsChange},
+        MediaFeatureChangePropagation::JustThisDocument);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetContrastOverride(ContrastOverride* aContrastOverride) {
+  *aContrastOverride = GetRootDocShell()->mContrastOverride;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetContrastOverride(ContrastOverride aContrastOverride) {
+  mContrastOverride = aContrastOverride;
+  RefPtr<nsPresContext> presContext = GetPresContext();
+  if (presContext) {
+    presContext->MediaFeatureValuesChanged(
+        {MediaFeatureChangeReason::SystemMetricsChange},
+        MediaFeatureChangePropagation::JustThisDocument);
+  }
+  return NS_OK;
+}
+
+// =============== Juggler End =======================
+
 NS_IMETHODIMP
 nsDocShell::GetIsNavigating(bool* aOut) {
   *aOut = mIsNavigating;
@@ -4815,7 +5001,7 @@ nsDocShell::GetVisibility(bool* aVisibility) {
 }
 
 void nsDocShell::ActivenessMaybeChanged() {
-  const bool isActive = mBrowsingContext->IsActive();
+  const bool isActive = mForceActiveState || mBrowsingContext->IsActive();
   if (RefPtr<PresShell> presShell = GetPresShell()) {
     presShell->ActivenessMaybeChanged();
   }
@@ -6886,6 +7072,10 @@ bool nsDocShell::CanSavePresentation(uint32_t aLoadType,
     return false;  // no entry to save into
   }
 
+  if (mDisallowBFCache) {
+    return false;
+  }
+
   MOZ_ASSERT(!mozilla::SessionHistoryInParent(),
              "mOSHE cannot be non-null with SHIP");
   nsCOMPtr<nsIDocumentViewer> viewer = mOSHE->GetDocumentViewer();
@@ -8642,6 +8832,12 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState) {
                      true,  // aForceNoOpener
                      getter_AddRefs(newBC));
       MOZ_ASSERT(!newBC);
+      if (rv == NS_OK) {
+        nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+        if (observerService) {
+          observerService->NotifyObservers(GetAsSupports(this), "juggler-window-open-in-new-context", nullptr);
+        }
+      }
       return rv;
     }
 
@@ -10028,6 +10224,16 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
                    nsINetworkPredictor::PREDICT_LOAD, attrs, nullptr);
 
   nsCOMPtr<nsIRequest> req;
+
+  // Juggler: report navigation started for non-same-document and non-javascript
+  // navigations.
+  if (!isJavaScript && !sameDocument) {
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->NotifyObservers(GetAsSupports(this), "juggler-navigation-started-renderer", NS_ConvertASCIItoUTF16(nsPrintfCString("%" PRIu64, aLoadState->GetLoadIdentifier())).get());
+    }
+  }
   rv = DoURILoad(aLoadState, aCacheKey, getter_AddRefs(req));
 
   if (NS_SUCCEEDED(rv)) {
@@ -13443,6 +13649,9 @@ class OnLinkClickEvent : public Runnable {
       mHandler->OnLinkClickSync(mContent, mLoadState, mNoOpenerImplied,
                                 mTriggeringPrincipal);
     }
+    nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+    observerService->NotifyObservers(ToSupports(mContent), "juggler-link-click-sync", nullptr);
+
     return NS_OK;
   }
 
@@ -13560,6 +13769,8 @@ nsresult nsDocShell::OnLinkClick(
 
   nsCOMPtr<nsIRunnable> ev = new OnLinkClickEvent(
       this, aContent, loadState, noOpenerImplied, aTriggeringPrincipal);
+  nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+  observerService->NotifyObservers(ToSupports(aContent), "juggler-link-click", nullptr);
   return Dispatch(ev.forget());
 }
 
