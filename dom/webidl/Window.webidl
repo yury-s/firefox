@@ -424,6 +424,7 @@ dictionary SynthesizeMouseEventOptions {
   // Set this to true to ensure that the event is dispatched to this DOM window
   // or one of its children.
   boolean toWindow = false;
+  boolean jugglerConvertToPointer = true;
 };
 
 // Mozilla-specific stuff
