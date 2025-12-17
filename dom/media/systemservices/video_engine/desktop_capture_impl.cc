@@ -476,12 +476,10 @@ void DesktopCaptureImpl::OnCaptureResult(DesktopCapturer::Result aResult,
   frameInfo.height = aFrame->size().height();
   frameInfo.videoType = VideoType::kARGB;
 
-  size_t videoFrameStride =
-      frameInfo.width * DesktopFrame::kBytesPerPixel;
   {
     webrtc::CritScope cs(&mApiCs);
     for (auto rawFrameCallback : _rawFrameCallbacks) {
-      rawFrameCallback->OnRawFrame(videoFrame, videoFrameStride, frameInfo);
+      rawFrameCallback->OnRawFrame(videoFrame, aFrame->stride(), frameInfo);
     }
   }
 
