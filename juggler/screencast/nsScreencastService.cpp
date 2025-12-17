@@ -173,7 +173,7 @@ class nsScreencastService::Session : public webrtc::RawFrameCallback {
     double timestamp = (TimeStamp::Now() - TimeStamp::ProcessCreation()).ToSeconds();
     int screenshotWidth = pageWidth;
     int screenshotHeight = pageHeight;
-    int screenshotTopMargin = mMargin.TopBottom();
+    int screenshotTopMargin = mMargin.top;
     std::unique_ptr<uint8_t[]> canvas;
     uint8_t* canvasPtr = videoFrame;
     int canvasStride = videoFrameStride;
@@ -317,6 +317,9 @@ nsresult nsScreencastService::StartScreencast(nsIScreencastServiceClient* aClien
     return NS_ERROR_FAILURE;
 
   gfx::IntMargin margin;
+  // On Windows the captured frame size is different the window screen size,
+  // so we don't try to compute the frame margin.
+#if !defined(WIN32)
   // Screen bounds is the widget location on screen.
   auto screenBounds = widget->GetScreenBounds().ToUnknownRect();
   // Client bounds is the content location, in terms of parent widget.
@@ -328,6 +331,7 @@ nsresult nsScreencastService::StartScreencast(nsIScreencastServiceClient* aClien
   }
   // Crop the image to exclude frame (if any).
   margin = screenBounds - clientBounds;
+#endif
   // Crop the image to exclude controls.
   margin.top += offsetTop;
 
