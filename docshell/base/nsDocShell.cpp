@@ -3063,8 +3063,8 @@ nsDocShell::SetOverrideHasFocus(bool aEnabled) {
   return NS_OK;
 }
 
-bool nsDocShell::ShouldOverrideHasFocus() const {
-  return mOverrideHasFocus;
+bool nsDocShell::ShouldOverrideHasFocus() {
+  return GetRootDocShell()->mOverrideHasFocus;
 }
 
 NS_IMETHODIMP

@@ -388,7 +388,7 @@ class nsDocShell final : public nsDocLoader,
   bool IsFileInputInterceptionEnabled();
   void FilePickerShown(mozilla::dom::Element* element);
 
-  bool ShouldOverrideHasFocus() const;
+  bool ShouldOverrideHasFocus();
 
   bool IsBypassCSPEnabled();
 

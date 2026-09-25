@@ -4937,7 +4937,11 @@ bool Document::HasFocus(ErrorResult& rv) const {
   }
 
   if (IsActive() && mDocumentContainer->ShouldOverrideHasFocus()) {
-    return true;
+    // Emulate the window being active, but keep reporting which frame has focus.
+    if (bc->IsTop()) {
+      return true;
+    }
+    return fm->IsSameOrAncestor(bc, fm->GetFocusedBrowsingContext());
   }
 
   if (!fm->IsInActiveWindow(bc)) {
